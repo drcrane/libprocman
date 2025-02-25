@@ -13,9 +13,10 @@
 #define EXTPROCESS_STATE_INIT 1
 #define EXTPROCESS_STATE_SPAWNED 2
 #define EXTPROCESS_STATE_RUNNING 3
-#define EXTPROCESS_STATE_STOPPING 4
-#define EXTPROCESS_STATE_STOPPED 5
-#define EXTPROCESS_STATE_FINISHED 6
+#define EXTPROCESS_STATE_STOPPING_FDCLOSED 4
+#define EXTPROCESS_STATE_STOPPING_PROCESSDIED 5
+#define EXTPROCESS_STATE_STOPPED 6
+#define EXTPROCESS_STATE_FINISHED 7
 
 #define EXTPROCESS_BUFFER_INIT_SIZE 4096
 #define EXTPROCESS_BUFFER_CHUNK_SIZE 512
@@ -38,7 +39,6 @@ using ExtProcessBuffer = CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE>;
 typedef struct extprocess_context {
 	pid_t pid;
 	int state;
-	int defunct;
 	int exitstatus;
 	int redirectfd;
 	int stdoutfds[2];

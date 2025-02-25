@@ -202,7 +202,7 @@ int ExtProcesses::maintain() {
 			processpollfd_idxs_.at(pollfd_len) = process_idx;
 			++ pollfd_len;
 		}
-		if (currproc.state == EXTPROCESS_STATE_RUNNING || currproc.state == EXTPROCESS_STATE_STOPPING) {
+		if (currproc.state == EXTPROCESS_STATE_RUNNING || currproc.state == EXTPROCESS_STATE_STOPPING_FDCLOSED || currproc.state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
 			running_process_count += 1;
 		}
 	}
@@ -244,15 +244,15 @@ int ExtProcesses::maintain() {
 			// and close it again
 			// this is still required though in the event that a child
 			// closes their end of the pipe without terminating
-			debug("HUP %d %s\n", curr_ctx->pid, curr_ctx->defunct ? "DEFUNCT" : "RUNNING");
+			debug("HUP %d %s\n", curr_ctx->pid, curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED ? "DEFUNCT" : "RUNNING");
 			if (curr_ctx->stdoutfds[0] != -1) {
 				close(curr_ctx->stdoutfds[0]);
 				curr_ctx->stdoutfds[0] = -1;
-				curr_ctx->state = EXTPROCESS_STATE_STOPPING;
-			}
-			// we have already called waitpid since we got a signal
-			if (curr_ctx->defunct) {
-				curr_ctx->state = EXTPROCESS_STATE_STOPPED;
+				if (curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
+					curr_ctx->state = EXTPROCESS_STATE_STOPPED;
+				} else {
+					curr_ctx->state = EXTPROCESS_STATE_STOPPING_FDCLOSED;
+				}
 			}
 		}
 	}
@@ -280,11 +280,12 @@ int ExtProcesses::maintain() {
 					}
 					if (chldpid > 0) {
 						if (WIFSIGNALED(pstatus) || WIFEXITED(pstatus)) {
-							if (curr_ctx->state == EXTPROCESS_STATE_STOPPING) {
+							if (curr_ctx->state == EXTPROCESS_STATE_STOPPING_FDCLOSED) {
 								curr_ctx->state = EXTPROCESS_STATE_STOPPED;
 								running_process_count --;
+							} else {
+								curr_ctx->state = EXTPROCESS_STATE_STOPPING_PROCESSDIED;
 							}
-							curr_ctx->defunct = 1;
 						}
 						if (WIFSTOPPED(pstatus)) {
 							debug("STOPPED\n");
@@ -312,7 +313,7 @@ finish:
 const int ExtProcesses::runningcount() const {
 	size_t count = 0;
 	for (const extprocess_context& proc : processes_) {
-		if (proc.state == EXTPROCESS_STATE_RUNNING || proc.state == EXTPROCESS_STATE_STOPPING) {
+		if (proc.state == EXTPROCESS_STATE_RUNNING || proc.state == EXTPROCESS_STATE_STOPPING_FDCLOSED || proc.state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
 			count ++;
 		}
 	}
