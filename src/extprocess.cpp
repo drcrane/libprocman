@@ -3,15 +3,10 @@
 #define _GNU_SOURCE
 #endif
 
-#include "extprocess.h"
+#include "extprocess.hpp"
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
-#include <sys/wait.h>
-#include <sys/prctl.h>
-#include <sys/types.h>
-#include <signal.h>
-#include <sys/signalfd.h>
 #include <time.h>
 #include <poll.h>
 #include <malloc.h>
@@ -19,17 +14,15 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <sys/signalfd.h>
 
-#include <stdio.h>
 #include <vector>
 #include <string>
 #include <stdexcept>
-#include <string.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/signalfd.h>
-#include <wait.h>
-#include "extprocess.h"
 
 
 #define debug(...) fprintf(stderr, __VA_ARGS__)
@@ -298,5 +291,6 @@ int ExtProcesses::cleanup() {
 		if (proc.state == EXTPROCESS_STATE_STOPPED) {
 		}
 	}
+	return -1;
 }
 

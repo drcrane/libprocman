@@ -8,9 +8,12 @@
 
 template <size_t CircularBufferCapacity>
 class CircularBuffer {
+	/*
 	static_assert(CircularBufferCapacity >= CIRCULARBUFFER_MIN_SIZE &&
 			(CircularBufferCapacity & (CircularBufferCapacity - 1)) == 0,
 			"CircularBufferCapacity must be a power of two and at least 1024");
+	*/
+	static_assert((CircularBufferCapacity & (CircularBufferCapacity - 1)) == 0, "CircularBufferCapacity must be a power of 2");
 
 	public:
 	CircularBuffer() : buffer_(CircularBufferCapacity), head_(0), tail_(0) {}

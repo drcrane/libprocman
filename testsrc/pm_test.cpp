@@ -3,7 +3,7 @@
 #define _GNU_SOURCE
 #endif
 
-#include "extprocess.h"
+#include "extprocess.hpp"
 #include <string.h>
 #include <signal.h>
 #include <time.h>

@@ -1,7 +1,7 @@
 project('pm', 'c', 'cpp')
 
 libpm_sources = files(
-'src/pm.cpp'
+'src/extprocess.cpp'
 )
 
 libpm_include_dirs = include_directories('src')

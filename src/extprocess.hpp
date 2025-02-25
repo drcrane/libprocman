@@ -2,13 +2,13 @@
 #define EXTPROCESS_H
 
 #define _POSIX_C_SOURCE 200809L
+#include "circularbuffer.hpp"
 #include <stddef.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/types.h>
 #include <poll.h>
-#include <circularbuffer.hpp>
 
 #define EXTPROCESS_STATE_INIT 1
 #define EXTPROCESS_STATE_SPAWNED 2
