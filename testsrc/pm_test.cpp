@@ -1,9 +1,29 @@
+#define _POSIX_C_SOURCE 200809L
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "extprocess.h"
 #include <string.h>
 #include <signal.h>
 #include <time.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <stdio.h>
+#include <sys/wait.h>
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <signal.h>
+#include <sys/signalfd.h>
+#include <time.h>
+#include <poll.h>
+#include <malloc.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <assert.h>
 
-int64_t _get_monotonic_time_ms() {
+static int64_t _get_monotonic_time_ms() {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (int64_t)ts.tv_sec * 1000LL + ((int64_t)ts.tv_nsec / 1000000);
@@ -36,9 +56,14 @@ int producer_main(int argc, char *argv[]) {
 	fprintf(stderr, "%s Process %d\n", argv[0], getpid());
 	if (argc >= 3) {
 		if (strcmp(argv[2], "fast") == 0) {
-			while (!should_quit) {
+			while (!should_quit && !should_term) {
 				write(STDOUT_FILENO, "01234567", 8);
 			}
+		}
+		if (strcmp(argv[2], "fastignoresignals") == 0) {
+			do {
+				write(STDOUT_FILENO, "01234567", 8);
+			} while (1);
 		}
 		if (strcmp(argv[2], "none") == 0) {
 			sleep(3);
@@ -55,7 +80,7 @@ int producer_main(int argc, char *argv[]) {
 			do {
 				sleep(3);
 				write(STDOUT_FILENO, "0123456789012345", 16);
-			} while (1);
+			} while (!should_quit && !should_term);
 		}
 	}
 	fprintf(stderr, "%d (%s) Terminating\n", getpid(), argv[0]);
@@ -69,10 +94,10 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	extprocess_context * startup = monitoredprocesses.create();
-	//startup->redirectfd = 1;
+	extprocess_context * startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	startup->redirectfd = 1;
 	monitoredprocesses.spawn(startup, argv[0], "startupprocess", "producer", "none");
-	extprocess_context * sleeper = monitoredprocesses.create();
+	extprocess_context * sleeper = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
 	sleeper->redirectfd = 1;
 	monitoredprocesses.spawn(sleeper, argv[0], "sleeper", "producer", "sleepandproduce");
 
@@ -81,7 +106,7 @@ int main(int argc, char *argv[]) {
 	do {
 		rc = monitoredprocesses.maintain();
 		if (_get_monotonic_time_ms() - start_time > 4000) {
-			//kill(sleeper->pid, SIGKILL);
+			kill(sleeper->pid, SIGKILL);
 		}
 	} while (rc == 0);
 	int64_t end_time = _get_monotonic_time_ms();

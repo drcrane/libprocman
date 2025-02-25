@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <sys/types.h>
 #include <poll.h>
 #include <circularbuffer.hpp>
@@ -24,11 +25,15 @@
 #define EXTPROCESS_SPAWN_ERROR_PRCTL 102
 #define EXTPROCESS_SPAWN_ERROR_PARENT_DEAD 103
 
+#define EXTPROCESS_INIT_FLAG_CAPTURESTDOUT 1
+#define EXTPROCESS_INIT_FLAG_CAPTURESTDERR 2
+#define EXTPROCESS_INIT_FLAG_SUPPLYSTDIN 4
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-using StdOutBuffer = CircularBuffer<2048>;
+using ExtProcessBuffer = CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE>;
 
 typedef struct extprocess_context {
 	pid_t pid;
@@ -37,13 +42,14 @@ typedef struct extprocess_context {
 	int exitstatus;
 	int redirectfd;
 	int stdoutfds[2];
-	StdOutBuffer stdoutbuf;
-	char * stdoutbuffer;
-	size_t stdoutcapacity;
-	size_t stdoutsize;
+	int stderrfds[2];
+	std::string cmd;
+	std::vector<std::string> argv;
+	ExtProcessBuffer stdoutbuf;
+	ExtProcessBuffer stderrbuf;
 } extprocess_context;
 
-int extprocess_init(extprocess_context * ctx);
+int extprocess_init(extprocess_context * ctx, uint32_t flags);
 int extprocess_spawn(extprocess_context * ctx, const char * cmd, char * argv[]);
 int extprocess_setupsignalhandler();
 int extprocess_releasesignalhandler(int sfd);
@@ -62,7 +68,7 @@ public:
 	ExtProcesses& operator=(const ExtProcesses& other) = delete;
 	ExtProcesses(ExtProcesses&& other) noexcept;
 	ExtProcesses& operator=(ExtProcesses&& other);
-	extprocess_context * create();
+	extprocess_context * create(uint8_t flags);
 	int spawn(extprocess_context * proc, std::string cmd, std::vector<std::string> argv);
 	template<typename... ArgV>
 	int spawn(extprocess_context * proc, std::string cmd, ArgV... args) {
@@ -72,6 +78,7 @@ public:
 		return spawn(proc, cmd, argv);
 	}
 	int maintain();
+	int cleanup();
 
 	std::vector<extprocess_context> processes_;
 	std::vector<struct pollfd> process_fds_;
