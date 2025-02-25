@@ -32,12 +32,29 @@ int extprocess_init(extprocess_context * ctx, uint32_t flags) {
 	ctx->state = EXTPROCESS_STATE_INIT;
 	ctx->redirectfd = -1;
 	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDOUT) {
-		if (pipe2(ctx->stdoutfds, O_NONBLOCK) == -1) {
+		//if (pipe2(ctx->stdoutfds, O_NONBLOCK) == -1) {
+		if (pipe(ctx->stdoutfds) == -1) {
+			return -1;
+		}
+		int flags = fcntl(ctx->stdoutfds[0], F_GETFL, 0);
+		if (flags == -1) {
+			close(ctx->stdoutfds[0]);
+			close(ctx->stdoutfds[1]);
+			ctx->stdoutfds[0] = -1;
+			ctx->stdoutfds[1] = -1;
+			return -1;
+		}
+		flags |= O_NONBLOCK;
+		if (fcntl(ctx->stdoutfds[0], F_SETFL, flags) == -1) {
+			close(ctx->stdoutfds[0]);
+			close(ctx->stdoutfds[1]);
+			ctx->stdoutfds[0] = -1;
+			ctx->stdoutfds[1] = -1;
 			return -1;
 		}
 		ctx->redirectfd = 1;
 	}
-	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDERR && pipe2(ctx->stderrfds, O_NONBLOCK) == -1) {
+	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDERR && pipe(ctx->stderrfds) == -1) {
 		close(ctx->stdoutfds[0]);
 		close(ctx->stdoutfds[1]);
 		return -1;
@@ -196,7 +213,6 @@ int ExtProcesses::maintain() {
 		res = -1;
 		goto finish;
 	}
-	debug("Running Processes: %d\n", (int)running_process_count);
 	if (running_process_count == 0) {
 		res = 1;
 		goto finish;
@@ -211,7 +227,7 @@ int ExtProcesses::maintain() {
 			res = -1;
 			goto finish;
 		}
-		debug("poll() %d my pid: %d\n", rc, getpid());
+		//debug("poll() %d my pid: %d\n", rc, getpid());
 	}
 	for (size_t pollfd_idx = 1; pollfd_idx < pollfd_len; ++ pollfd_idx) {
 		extprocess_context * curr_ctx = &processes_[processpollfd_idxs_[pollfd_idx]];
@@ -221,18 +237,22 @@ int ExtProcesses::maintain() {
 			if (rc > 0) {
 				curr_ctx->stdoutbuf.commit_write(rc);
 			}
-			debug("read() %d from %d\n", rc, curr_ctx->pid);
-		}
+//			debug("read() %d from %d\n", rc, curr_ctx->pid);
+		} else
 		if (process_fds_[pollfd_idx].revents & POLLHUP) {
 			// a signal could have already set this FD to -1, don't try
 			// and close it again
 			// this is still required though in the event that a child
 			// closes their end of the pipe without terminating
-			debug("HUP %d\n", curr_ctx->pid);
+			debug("HUP %d %s\n", curr_ctx->pid, curr_ctx->defunct ? "DEFUNCT" : "RUNNING");
 			if (curr_ctx->stdoutfds[0] != -1) {
 				close(curr_ctx->stdoutfds[0]);
 				curr_ctx->stdoutfds[0] = -1;
 				curr_ctx->state = EXTPROCESS_STATE_STOPPING;
+			}
+			// we have already called waitpid since we got a signal
+			if (curr_ctx->defunct) {
+				curr_ctx->state = EXTPROCESS_STATE_STOPPED;
 			}
 		}
 	}
@@ -256,12 +276,15 @@ int ExtProcesses::maintain() {
 					int pstatus = 0;
 					pid_t chldpid = waitpid(curr_ctx->pid, &pstatus, WNOHANG | WUNTRACED | WCONTINUED);
 					if (chldpid < 0) {
-						debug("waitpid %s\n", strerror(errno));
+						//debug("waitpid %s\n", strerror(errno));
 					}
 					if (chldpid > 0) {
 						if (WIFSIGNALED(pstatus) || WIFEXITED(pstatus)) {
-							curr_ctx->state = EXTPROCESS_STATE_STOPPED;
-							running_process_count --;
+							if (curr_ctx->state == EXTPROCESS_STATE_STOPPING) {
+								curr_ctx->state = EXTPROCESS_STATE_STOPPED;
+								running_process_count --;
+							}
+							curr_ctx->defunct = 1;
 						}
 						if (WIFSTOPPED(pstatus)) {
 							debug("STOPPED\n");
@@ -286,10 +309,42 @@ finish:
 	return res;
 }
 
-int ExtProcesses::cleanup() {
-	for (extprocess_context& proc : processes_) {
-		if (proc.state == EXTPROCESS_STATE_STOPPED) {
+const int ExtProcesses::runningcount() const {
+	size_t count = 0;
+	for (const extprocess_context& proc : processes_) {
+		if (proc.state == EXTPROCESS_STATE_RUNNING || proc.state == EXTPROCESS_STATE_STOPPING) {
+			count ++;
 		}
+	}
+	return count;
+}
+
+int ExtProcesses::cleanup() {
+	size_t count = 0;
+	for (extprocess_context& proc : processes_) {
+		if (proc.state == EXTPROCESS_STATE_INIT) {
+			// In the init state there are open file descriptors, close them
+			if (proc.stderrfds[0] != -1) {
+				close(proc.stderrfds[0]);
+				close(proc.stderrfds[1]);
+				proc.stderrfds[0] = -1;
+				proc.stderrfds[1] = -1;
+			}
+			if (proc.stdoutfds[0] != -1) {
+				close(proc.stdoutfds[0]);
+				close(proc.stdoutfds[1]);
+				proc.stdoutfds[0] = -1;
+				proc.stdoutfds[1] = -1;
+			}
+			proc.state = EXTPROCESS_STATE_FINISHED;
+		}
+		if (proc.state == EXTPROCESS_STATE_STOPPED || proc.state == EXTPROCESS_STATE_FINISHED) {
+			count += 1;
+		}
+	}
+	if (processes_.size() == count) {
+		processes_.resize(0);
+		return 0;
 	}
 	return -1;
 }

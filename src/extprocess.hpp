@@ -38,7 +38,7 @@ using ExtProcessBuffer = CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE>;
 typedef struct extprocess_context {
 	pid_t pid;
 	int state;
-	int polltimeout;
+	int defunct;
 	int exitstatus;
 	int redirectfd;
 	int stdoutfds[2];
@@ -79,6 +79,7 @@ public:
 	}
 	int maintain();
 	int cleanup();
+	const int runningcount() const;
 
 	std::vector<extprocess_context> processes_;
 	std::vector<struct pollfd> process_fds_;

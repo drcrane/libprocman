@@ -27,7 +27,8 @@ class CircularBuffer {
 	}
 
 	void commit_read(size_t bytes) {
-		if (bytes > size()) throw std::runtime_error("Overread");
+		size_t size = this->size();
+		if (bytes > size) throw std::runtime_error("Overread size: " + std::to_string(size));
 		head_ = (head_ + bytes) & (CircularBufferCapacity - 1);
 	}
 
@@ -41,7 +42,10 @@ class CircularBuffer {
 		}
 
 		const size_t available = CircularBufferCapacity - size;
-		const size_t contiguous = std::min(available, CircularBufferCapacity - tail_);
+		size_t contiguous = std::min(available, CircularBufferCapacity - tail_);
+		if (contiguous == CircularBufferCapacity) {
+			contiguous = contiguous / 2;
+		}
 		return {buffer_.data() + tail_, contiguous};
 	}
 

@@ -3,7 +3,6 @@
 #define _GNU_SOURCE
 #endif
 
-#include "extprocess.hpp"
 #include <string.h>
 #include <signal.h>
 #include <time.h>
@@ -22,6 +21,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
+
+#include "extprocess.hpp"
+#include "minunit.h"
 
 static int64_t _get_monotonic_time_ms() {
 	struct timespec ts;
@@ -71,6 +73,11 @@ int producer_main(int argc, char *argv[]) {
 			close(STDOUT_FILENO);
 			sleep(3);
 		}
+		if (strcmp(argv[2], "quickquit") == 0) {
+			sleep(1);
+			fprintf(stderr, "Quitting...\n");
+			sleep(1);
+		}
 		if (strcmp(argv[2], "justsleep") == 0) {
 			do {
 				sleep(4096);
@@ -87,6 +94,22 @@ int producer_main(int argc, char *argv[]) {
 	return 0;
 }
 
+const char * unredirected_child_with_self_termination_test(int argc, char *argv[]) {
+	extprocess_context * simplechild = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	monitoredprocesses.spawn(simplechild, argv[0], "simplechild", "producer", "quickquit");
+	int rc;
+	int64_t start_time;
+	start_time = _get_monotonic_time_ms();
+	do {
+		rc = monitoredprocesses.maintain();
+		if (_get_monotonic_time_ms() - start_time > 4000) {
+			kill(simplechild->pid, SIGKILL);
+			return "Process did not quit in appropriate time";
+		}
+	} while (rc == 0);
+	return NULL;
+}
+
 int main(int argc, char *argv[]) {
 	if (argc >= 2) {
 		if (strcmp(argv[1], "producer") == 0) {
@@ -94,6 +117,15 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	int rc;
+	int64_t start_time;
+	int64_t end_time;
+
+	const char * res;
+	if ((res = unredirected_child_with_self_termination_test(argc, argv))) { fprintf(stderr, "FAILED: %s\n", res); }
+
+	#define TEST1
+	#ifdef TEST1
 	extprocess_context * startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
 	startup->redirectfd = 1;
 	monitoredprocesses.spawn(startup, argv[0], "startupprocess", "producer", "none");
@@ -101,17 +133,77 @@ int main(int argc, char *argv[]) {
 	sleeper->redirectfd = 1;
 	monitoredprocesses.spawn(sleeper, argv[0], "sleeper", "producer", "sleepandproduce");
 
-	int rc;
-	int64_t start_time = _get_monotonic_time_ms();
+	start_time = _get_monotonic_time_ms();
 	do {
 		rc = monitoredprocesses.maintain();
 		if (_get_monotonic_time_ms() - start_time > 4000) {
 			kill(sleeper->pid, SIGKILL);
 		}
 	} while (rc == 0);
-	int64_t end_time = _get_monotonic_time_ms();
+	end_time = _get_monotonic_time_ms();
 
-	fprintf(stderr, "start_time: %lld\nend_time:   %lld\n", start_time, end_time);
+	fprintf(stderr, "PROCESS COUNT should now be 0 actual = %d\n", monitoredprocesses.runningcount());
+
+	rc = monitoredprocesses.cleanup();
+	fprintf(stderr, "Cleanup Successful %s\n", rc == 0 ? "Yes" : "No");
+
+	fprintf(stderr, "start_time: %lld\nend_time:   %lld\n", (long long int)start_time, (long long int)end_time);
+
+	extprocess_context * fastproducer = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	fastproducer->redirectfd = 1;
+	monitoredprocesses.spawn(fastproducer, argv[0], "fastproducer", "producer", "fast");
+
+	start_time = _get_monotonic_time_ms();
+	int64_t notify_time = 0;
+	do {
+		rc = monitoredprocesses.maintain();
+		if (_get_monotonic_time_ms() - notify_time > 1000) {
+			fprintf(stderr, "size() %d\n", fastproducer->stdoutbuf.size());
+			notify_time = _get_monotonic_time_ms();
+		}
+		if (_get_monotonic_time_ms() - start_time > 5000) {
+			kill(fastproducer->pid, SIGTERM);
+		}
+	} while (rc == 0);
+
+	rc = monitoredprocesses.cleanup();
+
+	fprintf(stderr, "cleanup() %d\n", rc);
+	#endif
+	extprocess_context * readfile = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	readfile->redirectfd = 1;
+	monitoredprocesses.spawn(readfile, "cat", "cat", "inputfile.bin");
+
+	int outfd = open("outputfile.bin", O_TRUNC | O_CREAT | O_RDWR, 0644);
+	fprintf(stderr, "fd %d\n", outfd);
+	do {
+		rc = monitoredprocesses.maintain();
+		//fprintf(stderr, "%d ", (int)readfile->stdoutbuf.size());
+		// loop for the times when the buffer overlaps the end
+		while (readfile->stdoutbuf.size() > 0) {
+			auto [ptr, ptr_sz] = readfile->stdoutbuf.prepare_read();
+			//fprintf(stderr, "prepare_read() %p %d\n", ptr, ptr_sz);
+			if (ptr_sz == 0) {
+				fprintf(stderr, "should never be 0!\n");
+				break;
+			}
+			int wrc = write(outfd, ptr, ptr_sz);
+			if (wrc <= 0) {
+				fprintf(stderr, "BORKED %d %s\n", errno, strerror(errno));
+				break;
+			}
+			if (wrc > 0) {
+				readfile->stdoutbuf.commit_read(ptr_sz);
+			}
+		}
+	} while (rc == 0);
+	close(outfd);
+	outfd = -1;
+	fprintf(stderr, "EXIT STATUS: %08x\n", WEXITSTATUS(readfile->exitstatus));
+	fprintf(stderr, "OUTPUT BUFFER SIZE %d\n", (int)readfile->stdoutbuf.size());
+
+	rc = monitoredprocesses.cleanup();
+	fprintf(stderr, "cleanup() %d\n", rc);
 
 	return 0;
 }
