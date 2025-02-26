@@ -1,3 +1,6 @@
+#ifndef CIRCULARBUFFER_H
+#define CIRCULARBUFFER_H
+
 #include <vector>
 #include <utility>
 #include <algorithm>
@@ -96,4 +99,6 @@ private:
 	size_t tail_;
 	size_t full_;
 };
+
+#endif // CIRCULARBUFFER_H
 
