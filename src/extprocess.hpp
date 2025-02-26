@@ -29,6 +29,7 @@
 #define EXTPROCESS_INIT_FLAG_CAPTURESTDOUT 1
 #define EXTPROCESS_INIT_FLAG_CAPTURESTDERR 2
 #define EXTPROCESS_INIT_FLAG_SUPPLYSTDIN 4
+#define EXTPROCESS_INIT_FLAG_CREATEHEARTBEAT 8
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,7 +41,6 @@ typedef struct extprocess_context {
 	pid_t pid;
 	int state;
 	int exitstatus;
-	int redirectfd;
 	int stdoutfds[2];
 	int stderrfds[2];
 	int heartbeatfds[2];

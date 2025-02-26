@@ -22,6 +22,8 @@
 #include <unistd.h>
 #include <assert.h>
 
+#include <memory>
+
 #include "extprocess.hpp"
 #include "minunit.h"
 
@@ -30,8 +32,6 @@ static int64_t _get_monotonic_time_ms() {
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (int64_t)ts.tv_sec * 1000LL + ((int64_t)ts.tv_nsec / 1000000);
 }
-
-ExtProcesses monitoredprocesses{-1};
 
 volatile sig_atomic_t should_quit;
 volatile sig_atomic_t should_term;
@@ -94,7 +94,10 @@ int producer_main(int argc, char *argv[]) {
 	return 0;
 }
 
-const char * unredirected_child_with_self_termination_test(int argc, char *argv[]) {
+std::unique_ptr<ExtProcesses> monitoredprocesses;
+//ExtProcesses& monitoredprocesses = nullptr;
+
+const char * unredirected_child_with_self_termination_test(ExtProcesses& monitoredprocesses, int argc, char *argv[]) {
 	extprocess_context * simplechild = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
 	monitoredprocesses.spawn(simplechild, argv[0], "simplechild", "producer", "quickquit");
 	int rc;
@@ -117,20 +120,24 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	//monitoredprocesses = std::make_unique<ExtProcesses>(-1);
+	ExtProcesses monitoredprocesses{-1};
+
 	int rc;
 	int64_t start_time;
 	int64_t end_time;
 
 	const char * res;
-	if ((res = unredirected_child_with_self_termination_test(argc, argv))) { fprintf(stderr, "FAILED: %s\n", res); }
+	if ((res = unredirected_child_with_self_termination_test(monitoredprocesses, argc, argv))) { fprintf(stderr, "FAILED: %s\n", res); }
 
 	#define TEST1
+	#define TEST2
+	#define TEST3
+
 	#ifdef TEST1
 	extprocess_context * startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	startup->redirectfd = 1;
 	monitoredprocesses.spawn(startup, argv[0], "startupprocess", "producer", "none");
 	extprocess_context * sleeper = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	sleeper->redirectfd = 1;
 	monitoredprocesses.spawn(sleeper, argv[0], "sleeper", "producer", "sleepandproduce");
 
 	start_time = _get_monotonic_time_ms();
@@ -146,11 +153,12 @@ int main(int argc, char *argv[]) {
 
 	rc = monitoredprocesses.cleanup();
 	fprintf(stderr, "Cleanup Successful %s\n", rc == 0 ? "Yes" : "No");
+	#endif
 
+	#ifdef TEST2
 	fprintf(stderr, "start_time: %lld\nend_time:   %lld\n", (long long int)start_time, (long long int)end_time);
 
 	extprocess_context * fastproducer = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	fastproducer->redirectfd = 1;
 	monitoredprocesses.spawn(fastproducer, argv[0], "fastproducer", "producer", "fast");
 
 	start_time = _get_monotonic_time_ms();
@@ -170,8 +178,9 @@ int main(int argc, char *argv[]) {
 
 	fprintf(stderr, "cleanup() %d\n", rc);
 	#endif
+
+	#ifdef TEST3
 	extprocess_context * readfile = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	readfile->redirectfd = 1;
 	monitoredprocesses.spawn(readfile, "cat", "cat", "inputfile.bin");
 
 	int outfd = open("outputfile.bin", O_TRUNC | O_CREAT | O_RDWR, 0644);
@@ -204,6 +213,17 @@ int main(int argc, char *argv[]) {
 
 	rc = monitoredprocesses.cleanup();
 	fprintf(stderr, "cleanup() %d\n", rc);
+	#endif
+
+/*
+	extprocess_context * startup = monitoredprocesses->create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	monitoredprocesses->spawn(startup, argv[0], "startupprocess", "producer", "none");
+
+	do {
+		rc = monitoredprocesses->maintain();
+		sleep(1);
+	} while (rc != -1);
+*/
 
 	return 0;
 }

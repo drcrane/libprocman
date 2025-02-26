@@ -27,10 +27,45 @@
 
 #define debug(...) fprintf(stderr, __VA_ARGS__)
 
+static void extprocess_resetpipes(int * pipes_ptr) {
+	if (pipes_ptr[0] != -1) {
+		close(pipes_ptr[0]);
+		pipes_ptr[0] = -1;
+	}
+	if (pipes_ptr[1] != -1) {
+		close(pipes_ptr[1]);
+		pipes_ptr[1] = -1;
+	}
+}
+
+static int extprocess_configurepipes(int * pipes_ptr) {
+	int rc = pipe(pipes_ptr);
+	if (rc == -1) {
+		return -1;
+	}
+	int flags = fcntl(pipes_ptr[0], F_GETFL, 0);
+	if (flags == -1) {
+		extprocess_resetpipes(pipes_ptr);
+		return -1;
+	}
+	flags |= O_NONBLOCK;
+	rc = fcntl(pipes_ptr[0], F_SETFL, flags);
+	if (rc == -1) {
+		extprocess_resetpipes(pipes_ptr);
+		return -1;
+	}
+	rc = fcntl(pipes_ptr[0], F_SETFD, FD_CLOEXEC);
+	if (rc == -1) {
+		extprocess_resetpipes(pipes_ptr);
+		return -1;
+	}
+	return 0;
+}
+
 int extprocess_init(extprocess_context * ctx, uint32_t flags) {
+	int rc;
 	ctx->pid = -1;
 	ctx->state = EXTPROCESS_STATE_INIT;
-	ctx->redirectfd = -1;
 	ctx->stderrfds[0] = -1;
 	ctx->stderrfds[1] = -1;
 	ctx->stdoutfds[0] = -1;
@@ -38,32 +73,25 @@ int extprocess_init(extprocess_context * ctx, uint32_t flags) {
 	ctx->heartbeatfds[0] = -1;
 	ctx->heartbeatfds[1] = -1;
 	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDOUT) {
-		//if (pipe2(ctx->stdoutfds, O_NONBLOCK) == -1) {
-		if (pipe(ctx->stdoutfds) == -1) {
+		rc = extprocess_configurepipes(ctx->stdoutfds);
+		if (rc == -1) {
 			return -1;
 		}
-		int flags = fcntl(ctx->stdoutfds[0], F_GETFL, 0);
-		if (flags == -1) {
-			close(ctx->stdoutfds[0]);
-			close(ctx->stdoutfds[1]);
-			ctx->stdoutfds[0] = -1;
-			ctx->stdoutfds[1] = -1;
-			return -1;
-		}
-		flags |= O_NONBLOCK;
-		if (fcntl(ctx->stdoutfds[0], F_SETFL, flags) == -1) {
-			close(ctx->stdoutfds[0]);
-			close(ctx->stdoutfds[1]);
-			ctx->stdoutfds[0] = -1;
-			ctx->stdoutfds[1] = -1;
-			return -1;
-		}
-		ctx->redirectfd = 1;
 	}
-	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDERR && pipe(ctx->stderrfds) == -1) {
-		close(ctx->stdoutfds[0]);
-		close(ctx->stdoutfds[1]);
-		return -1;
+	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDERR) {
+		rc = extprocess_configurepipes(ctx->stderrfds);
+		if (rc == -1) {
+			extprocess_resetpipes(ctx->stdoutfds);
+			return -1;
+		}
+	}
+	if (flags & EXTPROCESS_INIT_FLAG_CREATEHEARTBEAT) {
+		rc = extprocess_configurepipes(ctx->heartbeatfds);
+		if (rc == -1) {
+			extprocess_resetpipes(ctx->stderrfds);
+			extprocess_resetpipes(ctx->heartbeatfds);
+			return -1;
+		}
 	}
 	return 0;
 }
@@ -79,11 +107,19 @@ int extprocess_spawn(extprocess_context * ctx, const char * cmd, char * argv[]) 
 	if (pid == 0) {
 		// this is the child
 		pid_t ppid;
-		close(ctx->stdoutfds[0]);
-		ctx->stdoutfds[0] = -1;
-		if (ctx->redirectfd != -1 && ctx->redirectfd != ctx->stdoutfds[1]) {
-			dup2(ctx->stdoutfds[1], ctx->redirectfd);
+		if (ctx->stdoutfds[1] != -1) {
+			int rc = close(ctx->stdoutfds[0]);
+			fprintf(stderr, "close() parent fd %d: %d %d %s\n", ctx->stdoutfds[0], rc, errno, strerror(errno));
+			ctx->stdoutfds[0] = -1;
+			dup2(ctx->stdoutfds[1], 1);
 			close(ctx->stdoutfds[1]);
+		}
+		if (ctx->stderrfds[1] != -1) {
+			int rc = close(ctx->stderrfds[0]);
+			fprintf(stderr, "close() parent fd %d: %d %d %s\n", ctx->stderrfds[0], rc, errno, strerror(errno));
+			ctx->stderrfds[0] = -1;
+			dup2(ctx->stderrfds[1], 2);
+			close(ctx->stderrfds[1]);
 		}
 		rc = setpgid(0, 0);
 		if (rc == -1) { rc = EXTPROCESS_SPAWN_ERROR_SETPGID; goto child_error; }
@@ -98,31 +134,37 @@ child_error:
 	}
 	close(ctx->stdoutfds[1]);
 	ctx->stdoutfds[1] = -1;
-	rc = fcntl(ctx->stdoutfds[0], F_SETFD, FD_CLOEXEC);
-	if (rc < 0) {
-		kill(pid, SIGKILL);
-		close(ctx->stdoutfds[0]);
-		ctx->stdoutfds[0] = -1;
-		return -1;
-	}
+//	rc = fcntl(ctx->stdoutfds[0], F_SETFD, FD_CLOEXEC);
+//	if (rc < 0) {
+//		kill(pid, SIGKILL);
+//		close(ctx->stdoutfds[0]);
+//		ctx->stdoutfds[0] = -1;
+//		return -1;
+//	}
 	ctx->pid = pid;
 	ctx->state = EXTPROCESS_STATE_RUNNING;
 	return 0;
 }
 
 int extprocess_setupsignalhandler() {
-	sigset_t mask;
+	sigset_t mask, oldmask;
 	int sfd;
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGINT);
 	sigaddset(&mask, SIGCHLD);
 
-	if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
+	if (sigprocmask(SIG_BLOCK, &mask, &oldmask) == -1) {
 		perror("sigprocmask");
 		return -1;
 	}
 
 	sfd = signalfd(-1, &mask, 0);
+	int rc = fcntl(sfd, F_SETFD, FD_CLOEXEC);
+	if (rc == -1) {
+		sigprocmask(SIG_SETMASK, &oldmask, NULL);
+		close(sfd);
+		return -1;
+	}
 	return sfd;
 }
 
@@ -302,7 +344,7 @@ int ExtProcesses::maintain() {
 					int pstatus = 0;
 					pid_t chldpid = waitpid(curr_ctx->pid, &pstatus, WNOHANG | WUNTRACED | WCONTINUED);
 					if (chldpid < 0) {
-						//debug("waitpid %s\n", strerror(errno));
+						debug("waitpid %s\n", strerror(errno));
 					}
 					if (chldpid > 0) {
 						if (WIFSIGNALED(pstatus) || WIFEXITED(pstatus)) {
@@ -351,18 +393,9 @@ int ExtProcesses::cleanup() {
 	for (extprocess_context& proc : processes_) {
 		if (proc.state == EXTPROCESS_STATE_INIT) {
 			// In the init state there are open file descriptors, close them
-			if (proc.stderrfds[0] != -1) {
-				close(proc.stderrfds[0]);
-				close(proc.stderrfds[1]);
-				proc.stderrfds[0] = -1;
-				proc.stderrfds[1] = -1;
-			}
-			if (proc.stdoutfds[0] != -1) {
-				close(proc.stdoutfds[0]);
-				close(proc.stdoutfds[1]);
-				proc.stdoutfds[0] = -1;
-				proc.stdoutfds[1] = -1;
-			}
+			extprocess_resetpipes(proc.stdoutfds);
+			extprocess_resetpipes(proc.stderrfds);
+			extprocess_resetpipes(proc.heartbeatfds);
 			proc.state = EXTPROCESS_STATE_FINISHED;
 		}
 		if (proc.state == EXTPROCESS_STATE_STOPPED || proc.state == EXTPROCESS_STATE_FINISHED) {
