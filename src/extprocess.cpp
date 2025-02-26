@@ -109,14 +109,14 @@ int extprocess_spawn(extprocess_context * ctx, const char * cmd, char * argv[]) 
 		pid_t ppid;
 		if (ctx->stdoutfds[1] != -1) {
 			int rc = close(ctx->stdoutfds[0]);
-			fprintf(stderr, "close() parent fd %d: %d %d %s\n", ctx->stdoutfds[0], rc, errno, strerror(errno));
+			debug("close() parent fd %d: %d %d %s\n", ctx->stdoutfds[0], rc, errno, strerror(errno));
 			ctx->stdoutfds[0] = -1;
 			dup2(ctx->stdoutfds[1], 1);
 			close(ctx->stdoutfds[1]);
 		}
 		if (ctx->stderrfds[1] != -1) {
 			int rc = close(ctx->stderrfds[0]);
-			fprintf(stderr, "close() parent fd %d: %d %d %s\n", ctx->stderrfds[0], rc, errno, strerror(errno));
+			debug("close() parent fd %d: %d %d %s\n", ctx->stderrfds[0], rc, errno, strerror(errno));
 			ctx->stderrfds[0] = -1;
 			dup2(ctx->stderrfds[1], 2);
 			close(ctx->stderrfds[1]);
