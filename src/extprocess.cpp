@@ -31,6 +31,12 @@ int extprocess_init(extprocess_context * ctx, uint32_t flags) {
 	ctx->pid = -1;
 	ctx->state = EXTPROCESS_STATE_INIT;
 	ctx->redirectfd = -1;
+	ctx->stderrfds[0] = -1;
+	ctx->stderrfds[1] = -1;
+	ctx->stdoutfds[0] = -1;
+	ctx->stdoutfds[1] = -1;
+	ctx->heartbeatfds[0] = -1;
+	ctx->heartbeatfds[1] = -1;
 	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDOUT) {
 		//if (pipe2(ctx->stdoutfds, O_NONBLOCK) == -1) {
 		if (pipe(ctx->stdoutfds) == -1) {
@@ -177,29 +183,38 @@ int ExtProcesses::spawn(extprocess_context * proc, std::string cmd, std::vector<
 	return rc;
 }
 
+void ExtProcesses::add_fd(std::vector<std::pair<size_t, ExtProcessBuffer *>>& bufs, std::vector<struct pollfd>& pollfds, size_t process_idx, int fd, ExtProcessBuffer * buf) {
+	struct pollfd& pfd = pollfds.emplace_back();
+	pfd.fd = fd;
+	pfd.events = POLLIN | POLLHUP;
+	pfd.revents = 0;
+	bufs.emplace_back(process_idx, buf);
+}
+
 int ExtProcesses::maintain() {
 	struct signalfd_siginfo siginfo;
 	// one extra for the signalfd
-	size_t fd_count = processes_.size() + 1;
-	processpollfd_idxs_.resize(0);
 	poll_fds_.resize(0);
 	fdbuffers_.resize(0);
 	struct pollfd * pollfd = &poll_fds_.emplace_back();
 	pollfd->fd = sfd_;
 	pollfd->events = POLLIN | POLLHUP;
 	pollfd->revents = 0;
-	size_t processes_len = this->processes_.size();
+	size_t processes_len = processes_.size();
 	size_t pollfd_len = 1;
 	size_t running_process_count = 0;
 	for (size_t process_idx = 0; process_idx < processes_len; ++ process_idx) {
 		extprocess_context& currproc = processes_.at(process_idx);
 		if (currproc.stdoutfds[0] != -1) {
-			struct pollfd& pfd = poll_fds_.emplace_back();
-			pfd.fd = currproc.stdoutfds[0];
-			pfd.events = POLLIN | POLLHUP;
-			pfd.revents = 0;
-			processpollfd_idxs_.emplace_back(pollfd_len) = process_idx;
-			fdbuffers_.emplace_back(process_idx, &currproc.stdoutbuf);
+			add_fd(fdbuffers_, poll_fds_, process_idx, currproc.stdoutfds[0], &currproc.stdoutbuf);
+			++ pollfd_len;
+		}
+		if (currproc.stderrfds[0] != -1) {
+			add_fd(fdbuffers_, poll_fds_, process_idx, currproc.stderrfds[0], &currproc.stderrbuf);
+			++ pollfd_len;
+		}
+		if (currproc.heartbeatfds[0] != -1) {
+			add_fd(fdbuffers_, poll_fds_, process_idx, currproc.heartbeatfds[0], &currproc.heartbeatbuf);
 			++ pollfd_len;
 		}
 		if (currproc.state == EXTPROCESS_STATE_RUNNING || currproc.state == EXTPROCESS_STATE_STOPPING_FDCLOSED || currproc.state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
@@ -246,9 +261,19 @@ int ExtProcesses::maintain() {
 			// this is still required though in the event that a child
 			// closes their end of the pipe without terminating
 			debug("HUP %d %s\n", curr_ctx->pid, curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED ? "DEFUNCT" : "RUNNING");
-			if (curr_ctx->stdoutfds[0] != -1) {
+			if (curr_ctx->stdoutfds[0] == poll_fds_[pollfd_idx].fd) {
 				close(curr_ctx->stdoutfds[0]);
 				curr_ctx->stdoutfds[0] = -1;
+			}
+			if (curr_ctx->stderrfds[0] == poll_fds_[pollfd_idx].fd) {
+				close(curr_ctx->stdoutfds[0]);
+				curr_ctx->stdoutfds[0] = -1;
+			}
+			if (curr_ctx->heartbeatfds[0] == poll_fds_[pollfd_idx].fd) {
+				close(curr_ctx->heartbeatfds[0]);
+				curr_ctx->heartbeatfds[0] = -1;
+			}
+			if (curr_ctx->stdoutfds[0] == -1 && curr_ctx->stderrfds[0] == -1 && curr_ctx->heartbeatfds[0] == -1) {
 				if (curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
 					curr_ctx->state = EXTPROCESS_STATE_STOPPED;
 				} else {

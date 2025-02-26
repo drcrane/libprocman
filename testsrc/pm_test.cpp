@@ -158,7 +158,7 @@ int main(int argc, char *argv[]) {
 	do {
 		rc = monitoredprocesses.maintain();
 		if (_get_monotonic_time_ms() - notify_time > 1000) {
-			fprintf(stderr, "size() %d\n", fastproducer->stdoutbuf.size());
+			fprintf(stderr, "size() %d\n", (int)fastproducer->stdoutbuf.size());
 			notify_time = _get_monotonic_time_ms();
 		}
 		if (_get_monotonic_time_ms() - start_time > 5000) {

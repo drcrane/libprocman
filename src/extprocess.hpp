@@ -43,10 +43,12 @@ typedef struct extprocess_context {
 	int redirectfd;
 	int stdoutfds[2];
 	int stderrfds[2];
+	int heartbeatfds[2];
 	std::string cmd;
 	std::vector<std::string> argv;
 	ExtProcessBuffer stdoutbuf;
 	ExtProcessBuffer stderrbuf;
+	ExtProcessBuffer heartbeatbuf;
 } extprocess_context;
 
 int extprocess_init(extprocess_context * ctx, uint32_t flags);
@@ -81,9 +83,9 @@ public:
 	int cleanup();
 	const int runningcount() const;
 
+	static void add_fd(std::vector<std::pair<size_t, ExtProcessBuffer *>>& bufs, std::vector<struct pollfd>& pollfds, size_t process_idx, int fd, ExtProcessBuffer * buf);
 	std::vector<extprocess_context> processes_;
 	std::vector<struct pollfd> poll_fds_;
-	std::vector<size_t> processpollfd_idxs_;
 	std::vector<std::pair<size_t, ExtProcessBuffer *>> fdbuffers_;
 	int sfd_;
 	int timeout_;
