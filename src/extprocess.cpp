@@ -181,11 +181,10 @@ int ExtProcesses::maintain() {
 	struct signalfd_siginfo siginfo;
 	// one extra for the signalfd
 	size_t fd_count = processes_.size() + 1;
-	if (this->processpollfd_idxs_.size() != fd_count || this->process_fds_.size() != fd_count) {
-		this->processpollfd_idxs_.resize(fd_count);
-		this->process_fds_.resize(fd_count);
-	}
-	struct pollfd * pollfd = &process_fds_.at(0);
+	processpollfd_idxs_.resize(0);
+	poll_fds_.resize(0);
+	fdbuffers_.resize(0);
+	struct pollfd * pollfd = &poll_fds_.emplace_back();
 	pollfd->fd = sfd_;
 	pollfd->events = POLLIN | POLLHUP;
 	pollfd->revents = 0;
@@ -193,13 +192,14 @@ int ExtProcesses::maintain() {
 	size_t pollfd_len = 1;
 	size_t running_process_count = 0;
 	for (size_t process_idx = 0; process_idx < processes_len; ++ process_idx) {
-		extprocess_context& currproc = this->processes_.at(process_idx);
+		extprocess_context& currproc = processes_.at(process_idx);
 		if (currproc.stdoutfds[0] != -1) {
-			struct pollfd& pfd = process_fds_.at(pollfd_len);
+			struct pollfd& pfd = poll_fds_.emplace_back();
 			pfd.fd = currproc.stdoutfds[0];
 			pfd.events = POLLIN | POLLHUP;
 			pfd.revents = 0;
-			processpollfd_idxs_.at(pollfd_len) = process_idx;
+			processpollfd_idxs_.emplace_back(pollfd_len) = process_idx;
+			fdbuffers_.emplace_back(process_idx, &currproc.stdoutbuf);
 			++ pollfd_len;
 		}
 		if (currproc.state == EXTPROCESS_STATE_RUNNING || currproc.state == EXTPROCESS_STATE_STOPPING_FDCLOSED || currproc.state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
@@ -218,7 +218,7 @@ int ExtProcesses::maintain() {
 		goto finish;
 	}
 	{
-		int rc = poll(process_fds_.data(), pollfd_len, timeout_);
+		int rc = poll(poll_fds_.data(), pollfd_len, timeout_);
 		if (rc < 0) {
 			if (errno == EINTR) {
 				debug("poll() EINTR\n");
@@ -230,16 +230,17 @@ int ExtProcesses::maintain() {
 		//debug("poll() %d my pid: %d\n", rc, getpid());
 	}
 	for (size_t pollfd_idx = 1; pollfd_idx < pollfd_len; ++ pollfd_idx) {
-		extprocess_context * curr_ctx = &processes_[processpollfd_idxs_[pollfd_idx]];
-		if (process_fds_[pollfd_idx].revents & POLLIN) {
-			auto [ptr, ptr_sz] = curr_ctx->stdoutbuf.prepare_write();
-			int rc = read(curr_ctx->stdoutfds[0], ptr, ptr_sz);
+		if (poll_fds_[pollfd_idx].revents & POLLIN) {
+			ExtProcessBuffer * curr_buf = fdbuffers_.at(pollfd_idx - 1).second;
+			auto [ptr, ptr_sz] = curr_buf->prepare_write();
+			int rc = read(poll_fds_[pollfd_idx].fd, ptr, ptr_sz);
 			if (rc > 0) {
-				curr_ctx->stdoutbuf.commit_write(rc);
+				curr_buf->commit_write(rc);
 			}
 //			debug("read() %d from %d\n", rc, curr_ctx->pid);
 		} else
-		if (process_fds_[pollfd_idx].revents & POLLHUP) {
+		if (poll_fds_[pollfd_idx].revents & POLLHUP) {
+			extprocess_context * curr_ctx = &processes_.at(fdbuffers_.at(pollfd_idx - 1).first);
 			// a signal could have already set this FD to -1, don't try
 			// and close it again
 			// this is still required though in the event that a child
@@ -256,7 +257,7 @@ int ExtProcesses::maintain() {
 			}
 		}
 	}
-	if (process_fds_[0].revents & POLLIN) {
+	if (poll_fds_[0].revents & POLLIN) {
 		ssize_t len = read(sfd_, &siginfo, sizeof(struct signalfd_siginfo));
 		if (len < 0) {
 			throw std::runtime_error(std::string("ExtProcesses: maintain() read(sfd_) ") + strerror(errno));
