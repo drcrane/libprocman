@@ -84,6 +84,7 @@ public:
 	std::vector<extprocess_context> processes_;
 	std::vector<struct pollfd> process_fds_;
 	std::vector<size_t> processpollfd_idxs_;
+	std::vector<std::pair<size_t, ExtProcessBuffer &>> fdbuffers_;
 	int sfd_;
 	int timeout_;
 };
