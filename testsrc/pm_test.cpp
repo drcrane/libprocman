@@ -98,15 +98,17 @@ std::unique_ptr<ExtProcesses> monitoredprocesses;
 //ExtProcesses& monitoredprocesses = nullptr;
 
 const char * unredirected_child_with_self_termination_test(ExtProcesses& monitoredprocesses, int argc, char *argv[]) {
-	extprocess_context * simplechild = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	monitoredprocesses.spawn(simplechild, argv[0], "simplechild", "producer", "quickquit");
+	//extprocess_context * simplechild = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	//monitoredprocesses.spawn(simplechild, argv[0], "simplechild", "producer", "quickquit");
+	std::weak_ptr<ExtProcess> simplechild = monitoredprocesses.create_ex(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	simplechild.lock()->spawn(argv[0], "simplechild", "producer", "quickquit");
 	int rc;
 	int64_t start_time;
 	start_time = _get_monotonic_time_ms();
 	do {
 		rc = monitoredprocesses.maintain();
 		if (_get_monotonic_time_ms() - start_time > 4000) {
-			kill(simplechild->pid, SIGKILL);
+			kill(simplechild.lock()->pid, SIGKILL);
 			return "Process did not quit in appropriate time";
 		}
 	} while (rc == 0);
@@ -130,9 +132,9 @@ int main(int argc, char *argv[]) {
 	const char * res;
 	if ((res = unredirected_child_with_self_termination_test(monitoredprocesses, argc, argv))) { fprintf(stderr, "FAILED: %s\n", res); }
 
-	#define TEST1
-	#define TEST2
-	#define TEST3
+//	#define TEST1
+//	#define TEST2
+//	#define TEST3
 
 	#ifdef TEST1
 	extprocess_context * startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);

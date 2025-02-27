@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include <stdio.h>
+
 #define CIRCULARBUFFER_MIN_SIZE 64
 #define CIRCULARBUFFER_CHUNK_SIZE 8
 
@@ -19,7 +21,11 @@ class CircularBuffer {
 	static_assert((CircularBufferCapacity & (CircularBufferCapacity - 1)) == 0, "CircularBufferCapacity must be a power of 2");
 
 	public:
-	CircularBuffer() : buffer_(CircularBufferCapacity), head_(0), tail_(0) {}
+	CircularBuffer() : buffer_(CircularBufferCapacity), head_(0), tail_(0) {
+	}
+
+	~CircularBuffer() {
+	}
 
 	std::pair<char *, size_t> prepare_read() {
 		size_t size = this->size();

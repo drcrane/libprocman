@@ -35,24 +35,19 @@
 extern "C" {
 #endif
 
-using ExtProcessBuffer = CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE>;
+//using ExtProcessBuffer = CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE>;
 
-typedef struct extprocess_context {
-	pid_t pid;
-	int state;
-	int exitstatus;
-	int stdoutfds[2];
-	int stderrfds[2];
-	int heartbeatfds[2];
-	std::string cmd;
-	std::vector<std::string> argv;
-	ExtProcessBuffer stdoutbuf;
-	ExtProcessBuffer stderrbuf;
-	ExtProcessBuffer heartbeatbuf;
-} extprocess_context;
+class ExtProcessBuffer : public CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE> {
+public:
+	ExtProcessBuffer();
+	~ExtProcessBuffer();
+	void close_read();
+private:
+	friend class ExtProcess;
+	friend class ExtProcesses;
+	int m_fds[2];
+};
 
-int extprocess_init(extprocess_context * ctx, uint32_t flags);
-int extprocess_spawn(extprocess_context * ctx, const char * cmd, char * argv[]);
 int extprocess_setupsignalhandler();
 int extprocess_releasesignalhandler(int sfd);
 
@@ -61,6 +56,34 @@ int extprocess_releasesignalhandler(int sfd);
 
 #include <string>
 #include <vector>
+#include <memory>
+
+class ExtProcess {
+public:
+	ExtProcess(uint32_t flags);
+	~ExtProcess();
+	ExtProcess(const ExtProcess& other) = delete;
+	ExtProcess& operator=(const ExtProcess& other) = delete;
+	ExtProcess(ExtProcess&& other) noexcept;
+	ExtProcess& operator=(ExtProcess& other);
+	void spawn(std::string cmd, std::vector<std::string> argv);
+	template<typename... ArgV>
+	void spawn(std::string cmd, ArgV... args) {
+		std::vector<std::string> argv;
+		(argv.push_back(args), ...);
+		return spawn(cmd, argv);
+	}
+	pid_t pid;
+private:
+	friend class ExtProcesses;
+	int state;
+	int exitstatus;
+	std::string cmd;
+	std::vector<std::string> argv;
+	std::unique_ptr<ExtProcessBuffer> stdoutbuf;
+	std::unique_ptr<ExtProcessBuffer> stderrbuf;
+	std::unique_ptr<ExtProcessBuffer> heartbeatbuf;
+};
 
 class ExtProcesses {
 public:
@@ -70,21 +93,13 @@ public:
 	ExtProcesses& operator=(const ExtProcesses& other) = delete;
 	ExtProcesses(ExtProcesses&& other) noexcept;
 	ExtProcesses& operator=(ExtProcesses&& other);
-	extprocess_context * create(uint8_t flags);
-	int spawn(extprocess_context * proc, std::string cmd, std::vector<std::string> argv);
-	template<typename... ArgV>
-	int spawn(extprocess_context * proc, std::string cmd, ArgV... args) {
-		std::vector<std::string> argv;
-		//argv.push_back(cmd);
-		(argv.push_back(args), ...);
-		return spawn(proc, cmd, argv);
-	}
+	std::weak_ptr<ExtProcess> create_ex(uint8_t flags);
 	int maintain();
 	int cleanup();
 	const int runningcount() const;
 
 	static void add_fd(std::vector<std::pair<size_t, ExtProcessBuffer *>>& bufs, std::vector<struct pollfd>& pollfds, size_t process_idx, int fd, ExtProcessBuffer * buf);
-	std::vector<extprocess_context> processes_;
+	std::vector<std::shared_ptr<ExtProcess>> m_processes;
 	std::vector<struct pollfd> poll_fds_;
 	std::vector<std::pair<size_t, ExtProcessBuffer *>> fdbuffers_;
 	int sfd_;
