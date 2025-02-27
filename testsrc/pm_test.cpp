@@ -25,7 +25,6 @@
 #include <memory>
 
 #include "extprocess.hpp"
-#include "minunit.h"
 
 static int64_t _get_monotonic_time_ms() {
 	struct timespec ts;
