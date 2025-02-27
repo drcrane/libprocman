@@ -35,19 +35,6 @@
 extern "C" {
 #endif
 
-//using ExtProcessBuffer = CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE>;
-
-class ExtProcessBuffer : public CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE> {
-public:
-	ExtProcessBuffer();
-	~ExtProcessBuffer();
-	void close_read();
-private:
-	friend class ExtProcess;
-	friend class ExtProcesses;
-	int m_fds[2];
-};
-
 int extprocess_setupsignalhandler();
 int extprocess_releasesignalhandler(int sfd);
 
@@ -57,6 +44,19 @@ int extprocess_releasesignalhandler(int sfd);
 #include <string>
 #include <vector>
 #include <memory>
+
+class ExtProcessBuffer : public CircularBuffer<EXTPROCESS_BUFFER_INIT_SIZE> {
+public:
+	ExtProcessBuffer();
+	~ExtProcessBuffer();
+	void close_read();
+	int get_read_fd() { return m_fds[0]; }
+	int get_write_fd() { return m_fds[1]; }
+private:
+	friend class ExtProcess;
+	friend class ExtProcesses;
+	int m_fds[2];
+};
 
 class ExtProcess {
 public:
@@ -74,7 +74,7 @@ public:
 		return spawn(cmd, argv);
 	}
 	pid_t pid;
-private:
+//private:
 	friend class ExtProcesses;
 	int state;
 	int exitstatus;
@@ -95,15 +95,17 @@ public:
 	ExtProcesses& operator=(ExtProcesses&& other);
 	std::weak_ptr<ExtProcess> create_ex(uint8_t flags);
 	int maintain();
-	int cleanup();
+	void clear();
 	const int runningcount() const;
 
 	static void add_fd(std::vector<std::pair<size_t, ExtProcessBuffer *>>& bufs, std::vector<struct pollfd>& pollfds, size_t process_idx, int fd, ExtProcessBuffer * buf);
 	std::vector<std::shared_ptr<ExtProcess>> m_processes;
-	std::vector<struct pollfd> poll_fds_;
-	std::vector<std::pair<size_t, ExtProcessBuffer *>> fdbuffers_;
-	int sfd_;
-	int timeout_;
+	std::vector<struct pollfd> m_poll_fds;
+	std::vector<std::pair<size_t, ExtProcessBuffer *>> m_fdbuffers;
+	int m_sfd;
+	int m_timeout;
+	int m_dirty;
+	size_t m_running_process_count;
 };
 #endif
 

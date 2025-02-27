@@ -133,7 +133,7 @@ int main(int argc, char *argv[]) {
 
 //	#define TEST1
 //	#define TEST2
-//	#define TEST3
+	#define TEST3
 
 	#ifdef TEST1
 	extprocess_context * startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
@@ -181,8 +181,8 @@ int main(int argc, char *argv[]) {
 	#endif
 
 	#ifdef TEST3
-	extprocess_context * readfile = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	monitoredprocesses.spawn(readfile, "cat", "cat", "inputfile.bin");
+	std::shared_ptr<ExtProcess> readfile = monitoredprocesses.create_ex(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT).lock();
+	readfile->spawn("cat", "cat", "inputfile.bin");
 
 	int outfd = open("outputfile.bin", O_TRUNC | O_CREAT | O_RDWR, 0644);
 	fprintf(stderr, "fd %d\n", outfd);
@@ -190,8 +190,8 @@ int main(int argc, char *argv[]) {
 		rc = monitoredprocesses.maintain();
 		//fprintf(stderr, "%d ", (int)readfile->stdoutbuf.size());
 		// loop for the times when the buffer overlaps the end
-		while (readfile->stdoutbuf.size() > 0) {
-			auto [ptr, ptr_sz] = readfile->stdoutbuf.prepare_read();
+		while (readfile->stdoutbuf->size() > 0) {
+			auto [ptr, ptr_sz] = readfile->stdoutbuf->prepare_read();
 			//fprintf(stderr, "prepare_read() %p %d\n", ptr, ptr_sz);
 			if (ptr_sz == 0) {
 				fprintf(stderr, "should never be 0!\n");
@@ -203,17 +203,16 @@ int main(int argc, char *argv[]) {
 				break;
 			}
 			if (wrc > 0) {
-				readfile->stdoutbuf.commit_read(ptr_sz);
+				readfile->stdoutbuf->commit_read(ptr_sz);
 			}
 		}
 	} while (rc == 0);
 	close(outfd);
 	outfd = -1;
 	fprintf(stderr, "EXIT STATUS: %08x\n", WEXITSTATUS(readfile->exitstatus));
-	fprintf(stderr, "OUTPUT BUFFER SIZE %d\n", (int)readfile->stdoutbuf.size());
+	fprintf(stderr, "OUTPUT BUFFER SIZE %d\n", (int)readfile->stdoutbuf->size());
 
-	rc = monitoredprocesses.cleanup();
-	fprintf(stderr, "cleanup() %d\n", rc);
+	monitoredprocesses.clear();
 	#endif
 
 /*
