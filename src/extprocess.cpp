@@ -161,6 +161,15 @@ void ExtProcess::spawn(std::string cmd, std::vector<std::string> argv) {
 	if (pid == 0) {
 		// this is the child
 		pid_t ppid;
+		{
+			signal(SIGQUIT, SIG_DFL);
+			signal(SIGTERM, SIG_DFL);
+			signal(SIGINT, SIG_DFL);
+			signal(SIGCHLD, SIG_DFL);
+			sigset_t new_mask;
+			sigemptyset(&new_mask);
+			sigprocmask(SIG_SETMASK, &new_mask, NULL);
+		}
 		if (stdoutbuf != nullptr && stdoutbuf->m_fds[1] != -1) {
 			int rc = close(stdoutbuf->m_fds[0]);
 			fprintf(stderr, "close() parent fd %d: %d %d %s\n", stdoutbuf->m_fds[0], rc, errno, strerror(errno));
