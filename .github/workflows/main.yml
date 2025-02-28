@@ -1,0 +1,16 @@
+name: Echo on Push
+
+on:
+  push:
+
+jobs:
+  echo-job:
+    runs-on: ubuntu-latest
+    container: alpine:latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Echo message
+        run: echo "Running in Alpine"
