@@ -94,12 +94,9 @@ int producer_main(int argc, char *argv[]) {
 }
 
 std::unique_ptr<ExtProcesses> monitoredprocesses;
-//ExtProcesses& monitoredprocesses = nullptr;
 
 const char * unredirected_child_with_self_termination_test(ExtProcesses& monitoredprocesses, int argc, char *argv[]) {
-	//extprocess_context * simplechild = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	//monitoredprocesses.spawn(simplechild, argv[0], "simplechild", "producer", "quickquit");
-	std::weak_ptr<ExtProcess> simplechild = monitoredprocesses.create_ex(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	std::weak_ptr<ExtProcess> simplechild = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
 	simplechild.lock()->spawn(argv[0], "simplechild", "producer", "quickquit");
 	int rc;
 	int64_t start_time;
@@ -131,57 +128,50 @@ int main(int argc, char *argv[]) {
 	const char * res;
 	if ((res = unredirected_child_with_self_termination_test(monitoredprocesses, argc, argv))) { fprintf(stderr, "FAILED: %s\n", res); }
 
-//	#define TEST1
-//	#define TEST2
+	#define TEST1
+	#define TEST2
 	#define TEST3
 
 	#ifdef TEST1
-	extprocess_context * startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	monitoredprocesses.spawn(startup, argv[0], "startupprocess", "producer", "none");
-	extprocess_context * sleeper = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	monitoredprocesses.spawn(sleeper, argv[0], "sleeper", "producer", "sleepandproduce");
+	auto startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	startup.lock().get()->spawn(argv[0], "startupprocess", "producer", "none");
+	std::weak_ptr<ExtProcess> sleeper = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	sleeper.lock().get()->spawn(argv[0], "sleeper", "producer", "sleepandproduce");
 
 	start_time = _get_monotonic_time_ms();
 	do {
 		rc = monitoredprocesses.maintain();
 		if (_get_monotonic_time_ms() - start_time > 4000) {
-			kill(sleeper->pid, SIGKILL);
+			kill(sleeper.lock()->pid, SIGKILL);
 		}
 	} while (rc == 0);
 	end_time = _get_monotonic_time_ms();
 
 	fprintf(stderr, "PROCESS COUNT should now be 0 actual = %d\n", monitoredprocesses.runningcount());
-
-	rc = monitoredprocesses.cleanup();
-	fprintf(stderr, "Cleanup Successful %s\n", rc == 0 ? "Yes" : "No");
 	#endif
 
 	#ifdef TEST2
 	fprintf(stderr, "start_time: %lld\nend_time:   %lld\n", (long long int)start_time, (long long int)end_time);
 
-	extprocess_context * fastproducer = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
-	monitoredprocesses.spawn(fastproducer, argv[0], "fastproducer", "producer", "fast");
+	std::weak_ptr<ExtProcess> fastproducer = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
+	fastproducer.lock()->spawn(argv[0], "fastproducer", "producer", "fast");
 
 	start_time = _get_monotonic_time_ms();
 	int64_t notify_time = 0;
 	do {
 		rc = monitoredprocesses.maintain();
 		if (_get_monotonic_time_ms() - notify_time > 1000) {
-			fprintf(stderr, "size() %d\n", (int)fastproducer->stdoutbuf.size());
+			fprintf(stderr, "size() %d\n", (int)fastproducer.lock()->stdoutbuf->size());
 			notify_time = _get_monotonic_time_ms();
 		}
 		if (_get_monotonic_time_ms() - start_time > 5000) {
-			kill(fastproducer->pid, SIGTERM);
+			kill(fastproducer.lock()->pid, SIGTERM);
 		}
 	} while (rc == 0);
-
-	rc = monitoredprocesses.cleanup();
-
-	fprintf(stderr, "cleanup() %d\n", rc);
 	#endif
 
 	#ifdef TEST3
-	std::shared_ptr<ExtProcess> readfile = monitoredprocesses.create_ex(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT).lock();
+	std::shared_ptr<ExtProcess> readfile = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT).lock();
 	readfile->spawn("cat", "cat", "inputfile.bin");
 
 	int outfd = open("outputfile.bin", O_TRUNC | O_CREAT | O_RDWR, 0644);

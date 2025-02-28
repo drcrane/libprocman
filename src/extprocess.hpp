@@ -11,12 +11,10 @@
 #include <poll.h>
 
 #define EXTPROCESS_STATE_INIT 1
-#define EXTPROCESS_STATE_SPAWNED 2
-#define EXTPROCESS_STATE_RUNNING 3
-#define EXTPROCESS_STATE_STOPPING_FDCLOSED 4
-#define EXTPROCESS_STATE_STOPPING_PROCESSDIED 5
-#define EXTPROCESS_STATE_STOPPED 6
-#define EXTPROCESS_STATE_FINISHED 7
+#define EXTPROCESS_STATE_RUNNING 2
+#define EXTPROCESS_STATE_STOPPING_FDCLOSED 3
+#define EXTPROCESS_STATE_STOPPING_PROCESSDIED 4
+#define EXTPROCESS_STATE_FINISHED 5
 
 #define EXTPROCESS_BUFFER_INIT_SIZE 4096
 #define EXTPROCESS_BUFFER_CHUNK_SIZE 512
@@ -34,9 +32,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-int extprocess_setupsignalhandler();
-int extprocess_releasesignalhandler(int sfd);
 
 #ifdef __cplusplus
 }
@@ -93,7 +88,7 @@ public:
 	ExtProcesses& operator=(const ExtProcesses& other) = delete;
 	ExtProcesses(ExtProcesses&& other) noexcept;
 	ExtProcesses& operator=(ExtProcesses&& other);
-	std::weak_ptr<ExtProcess> create_ex(uint8_t flags);
+	std::weak_ptr<ExtProcess> create(uint8_t flags);
 	int maintain();
 	void clear();
 	const int runningcount() const;

@@ -24,7 +24,6 @@
 #include <string>
 #include <stdexcept>
 
-
 #define debug(...) fprintf(stderr, __VA_ARGS__)
 
 static int extprocess_resetpipes(int * pipes_ptr) {
@@ -76,7 +75,7 @@ static int extprocess_configurepipes(int * pipes_ptr) {
 	return 0;
 }
 
-int extprocess_setupsignalhandler() {
+static int extprocess_setupsignalhandler() {
 	sigset_t mask, oldmask;
 	int sfd;
 	sigemptyset(&mask);
@@ -98,7 +97,7 @@ int extprocess_setupsignalhandler() {
 	return sfd;
 }
 
-int extprocess_releasesignalhandler(int sfd) {
+static int extprocess_releasesignalhandler(int sfd) {
 	sigset_t mask;
 	close(sfd);
 	sigemptyset(&mask);
@@ -222,11 +221,27 @@ ExtProcesses::ExtProcesses(int sfd) {
 }
 
 ExtProcesses::~ExtProcesses() {
-	extprocess_releasesignalhandler(m_sfd);
-	m_sfd = 0;
+	if (m_sfd != -1) {
+		extprocess_releasesignalhandler(m_sfd);
+		m_sfd = -1;
+	}
 }
 
-std::weak_ptr<ExtProcess> ExtProcesses::create_ex(uint8_t flags) {
+ExtProcesses::ExtProcesses(ExtProcesses&& other) noexcept {
+	this->m_sfd = other.m_sfd;
+	this->m_processes = std::move(other.m_processes);
+}
+
+ExtProcesses& ExtProcesses::operator=(ExtProcesses&& other) {
+	this->m_processes.clear();
+	this->m_processes = std::move(other.m_processes);
+	this->m_sfd = other.m_sfd;
+	other.m_sfd = -1;
+	this->m_dirty = other.m_dirty;
+	return *this;
+}
+
+std::weak_ptr<ExtProcess> ExtProcesses::create(uint8_t flags) {
 	return std::weak_ptr<ExtProcess>(m_processes.emplace_back(std::make_shared<ExtProcess>(flags)));
 }
 
@@ -327,7 +342,7 @@ int ExtProcesses::maintain() {
 				(curr_ctx->stderrbuf == nullptr || curr_ctx->stderrbuf->m_fds[0] == -1) &&
 				(curr_ctx->heartbeatbuf == nullptr || curr_ctx->heartbeatbuf->m_fds[0] == -1)) {
 				if (curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
-					curr_ctx->state = EXTPROCESS_STATE_STOPPED;
+					curr_ctx->state = EXTPROCESS_STATE_FINISHED;
 				} else {
 					curr_ctx->state = EXTPROCESS_STATE_STOPPING_FDCLOSED;
 				}
@@ -361,7 +376,7 @@ int ExtProcesses::maintain() {
 					if (chldpid > 0) {
 						if (WIFSIGNALED(pstatus) || WIFEXITED(pstatus)) {
 							if (curr_ctx->state == EXTPROCESS_STATE_STOPPING_FDCLOSED) {
-								curr_ctx->state = EXTPROCESS_STATE_STOPPED;
+								curr_ctx->state = EXTPROCESS_STATE_FINISHED;
 								running_process_count --;
 								m_dirty = 1;
 							} else {
