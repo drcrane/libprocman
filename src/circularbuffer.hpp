@@ -21,7 +21,7 @@ class CircularBuffer {
 	static_assert((CircularBufferCapacity & (CircularBufferCapacity - 1)) == 0, "CircularBufferCapacity must be a power of 2");
 
 	public:
-	CircularBuffer() : buffer_(CircularBufferCapacity), head_(0), tail_(0) {
+	CircularBuffer() : buffer_(CircularBufferCapacity), head_(0), tail_(0), full_(0) {
 	}
 
 	~CircularBuffer() {
