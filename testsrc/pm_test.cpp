@@ -104,7 +104,7 @@ const char * unredirected_child_with_self_termination_test(ExtProcesses& monitor
 	do {
 		rc = monitoredprocesses.maintain();
 		if (_get_monotonic_time_ms() - start_time > 4000) {
-			kill(simplechild.lock()->pid, SIGKILL);
+			kill(simplechild.lock()->m_pid, SIGKILL);
 			return "Process did not quit in appropriate time";
 		}
 	} while (rc == 0);
@@ -118,19 +118,19 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	//monitoredprocesses = std::make_unique<ExtProcesses>(-1);
 	ExtProcesses monitoredprocesses{-1};
 
 	int rc;
-	int64_t start_time;
-	int64_t end_time;
+//	int64_t start_time;
+//	int64_t end_time;
 
 	const char * res;
 	if ((res = unredirected_child_with_self_termination_test(monitoredprocesses, argc, argv))) { fprintf(stderr, "FAILED: %s\n", res); }
 
-	#define TEST1
-	#define TEST2
-	#define TEST3
+//	#define TEST1
+//	#define TEST2
+//	#define TEST3
+	#define TEST4
 
 	#ifdef TEST1
 	auto startup = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT);
@@ -178,7 +178,7 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "fd %d\n", outfd);
 	do {
 		rc = monitoredprocesses.maintain();
-		//fprintf(stderr, "%d ", (int)readfile->stdoutbuf.size());
+		//fprintf(stderr, "STDOUT size %d\n", (int)readfile->stdoutbuf.size());
 		// loop for the times when the buffer overlaps the end
 		while (readfile->stdoutbuf->size() > 0) {
 			auto [ptr, ptr_sz] = readfile->stdoutbuf->prepare_read();
@@ -203,6 +203,30 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "OUTPUT BUFFER SIZE %d\n", (int)readfile->stdoutbuf->size());
 
 	monitoredprocesses.clear();
+	#endif
+
+	#ifdef TEST4
+	std::shared_ptr<ExtProcess> capturetest = monitoredprocesses.create(EXTPROCESS_INIT_FLAG_CAPTURESTDOUT | EXTPROCESS_INIT_FLAG_CAPTURESTDERR).lock();
+	capturetest->spawn(argv[0], "sleepy", "producer", "sleepandproduce");
+	int quit_requested = 0;
+	do {
+		rc = monitoredprocesses.maintain();
+		capturetest->m_stdoutbuf->dump();
+		size_t cbsize;
+		if (!quit_requested && (cbsize = capturetest->m_stdoutbuf->size()) > 16) {
+			fprintf(stderr, "ASKING TO QUIT pid %d bufsz %d\n", capturetest->m_pid, (int)cbsize);
+			kill(capturetest->m_pid, SIGQUIT);
+			quit_requested = 1;
+		}
+	} while (rc == 0);
+	std::string capturetest_stdout = capturetest->m_stdoutbuf->drain_to_string();
+	std::string capturetest_stderr = capturetest->m_stderrbuf->drain_to_string();
+	fprintf(stderr, "---- STDOUT ----\n");
+	fprintf(stderr, "%s\n", capturetest_stdout.c_str());
+	fprintf(stderr, "---- STDERR ----\n");
+	fprintf(stderr, "%s", capturetest_stderr.c_str());
+	fprintf(stderr, "----        ----\n");
+	capturetest.reset();
 	#endif
 
 /*

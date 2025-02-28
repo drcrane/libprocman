@@ -47,6 +47,7 @@ public:
 	void close_read();
 	int get_read_fd() { return m_fds[0]; }
 	int get_write_fd() { return m_fds[1]; }
+	std::string drain_to_string();
 private:
 	friend class ExtProcess;
 	friend class ExtProcesses;
@@ -68,16 +69,16 @@ public:
 		(argv.push_back(args), ...);
 		return spawn(cmd, argv);
 	}
-	pid_t pid;
+	pid_t m_pid;
 //private:
 	friend class ExtProcesses;
-	int state;
-	int exitstatus;
-	std::string cmd;
-	std::vector<std::string> argv;
-	std::unique_ptr<ExtProcessBuffer> stdoutbuf;
-	std::unique_ptr<ExtProcessBuffer> stderrbuf;
-	std::unique_ptr<ExtProcessBuffer> heartbeatbuf;
+	int m_state;
+	int m_exitstatus;
+	std::string m_cmd;
+	std::vector<std::string> m_argv;
+	std::unique_ptr<ExtProcessBuffer> m_stdoutbuf;
+	std::unique_ptr<ExtProcessBuffer> m_stderrbuf;
+	std::unique_ptr<ExtProcessBuffer> m_heartbeatbuf;
 };
 
 class ExtProcesses {

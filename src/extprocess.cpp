@@ -24,7 +24,8 @@
 #include <string>
 #include <stdexcept>
 
-#define debug(...) fprintf(stderr, __VA_ARGS__)
+//#define debug(a, ...) fprintf(stderr, a "\n", ##__VA_ARGS__)
+#define debug(...)
 
 static int extprocess_resetpipes(int * pipes_ptr) {
 	int rc;
@@ -126,17 +127,33 @@ void ExtProcessBuffer::close_read() {
 	}
 }
 
+std::string ExtProcessBuffer::drain_to_string() {
+	std::string output;
+	output.resize(this->size());
+	size_t pos = 0;
+	while (this->size() > 0) {
+		auto [ptr, ptr_sz] = this->prepare_read();
+		if (ptr == nullptr) {
+			throw new std::runtime_error("ExtProcessBuffer: size() > 0 but prepare_read() NULL");
+		}
+		memcpy(output.data() + pos, ptr, ptr_sz);
+		pos += ptr_sz;
+		this->commit_read(ptr_sz);
+	}
+	return output;
+}
+
 ExtProcess::ExtProcess(uint32_t flags) {
-	this->pid = -1;
-	this->state = EXTPROCESS_STATE_INIT;
+	this->m_pid = -1;
+	this->m_state = EXTPROCESS_STATE_INIT;
 	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDOUT) {
-		this->stdoutbuf = std::make_unique<ExtProcessBuffer>();
+		this->m_stdoutbuf = std::make_unique<ExtProcessBuffer>();
 	}
 	if (flags & EXTPROCESS_INIT_FLAG_CAPTURESTDERR) {
-		this->stderrbuf = std::make_unique<ExtProcessBuffer>();
+		this->m_stderrbuf = std::make_unique<ExtProcessBuffer>();
 	}
 	if (flags & EXTPROCESS_INIT_FLAG_CREATEHEARTBEAT) {
-		this->heartbeatbuf = std::make_unique<ExtProcessBuffer>();
+		this->m_heartbeatbuf = std::make_unique<ExtProcessBuffer>();
 	}
 }
 
@@ -150,7 +167,7 @@ void ExtProcess::spawn(std::string cmd, std::vector<std::string> argv) {
 		argv_charptr.push_back(arg.data());
 	}
 	argv_charptr.push_back(NULL);
-	assert(state == EXTPROCESS_STATE_INIT);
+	assert(m_state == EXTPROCESS_STATE_INIT);
 	int rc;
 	pid_t parentpid = getpid();
 	pid_t pid = fork();
@@ -169,19 +186,19 @@ void ExtProcess::spawn(std::string cmd, std::vector<std::string> argv) {
 			sigemptyset(&new_mask);
 			sigprocmask(SIG_SETMASK, &new_mask, NULL);
 		}
-		if (stdoutbuf != nullptr && stdoutbuf->m_fds[1] != -1) {
-			int rc = close(stdoutbuf->m_fds[0]);
-			fprintf(stderr, "close() parent fd %d: %d %d %s\n", stdoutbuf->m_fds[0], rc, errno, strerror(errno));
-			stdoutbuf->m_fds[0] = -1;
-			dup2(stdoutbuf->m_fds[1], 1);
-			close(stdoutbuf->m_fds[1]);
+		if (m_stdoutbuf != nullptr && m_stdoutbuf->m_fds[1] != -1) {
+			int rc = close(m_stdoutbuf->m_fds[0]);
+			fprintf(stderr, "close() parent fd %d: %d %d %s\n", m_stdoutbuf->m_fds[0], rc, errno, strerror(errno));
+			m_stdoutbuf->m_fds[0] = -1;
+			dup2(m_stdoutbuf->m_fds[1], 1);
+			close(m_stdoutbuf->m_fds[1]);
 		}
-		if (stderrbuf != nullptr && stderrbuf->m_fds[1] != -1) {
-			int rc = close(stderrbuf->m_fds[0]);
-			fprintf(stderr, "close() parent fd %d: %d %d %s\n", stderrbuf->m_fds[0], rc, errno, strerror(errno));
-			stderrbuf->m_fds[0] = -1;
-			dup2(stderrbuf->m_fds[1], 2);
-			close(stderrbuf->m_fds[1]);
+		if (m_stderrbuf != nullptr && m_stderrbuf->m_fds[1] != -1) {
+			int rc = close(m_stderrbuf->m_fds[0]);
+			fprintf(stderr, "close() parent fd %d: %d %d %s\n", m_stderrbuf->m_fds[0], rc, errno, strerror(errno));
+			m_stderrbuf->m_fds[0] = -1;
+			dup2(m_stderrbuf->m_fds[1], 2);
+			close(m_stderrbuf->m_fds[1]);
 		}
 		rc = setpgid(0, 0);
 		if (rc == -1) { rc = EXTPROCESS_SPAWN_ERROR_SETPGID; goto child_error; }
@@ -194,20 +211,20 @@ child_error:
 		fprintf(stderr, "spawn error %d %s\n", rc, strerror(errno));
 		exit(rc);
 	}
-	if (stdoutbuf && stdoutbuf->m_fds[1] != -1) {
-		rc = close(stdoutbuf->m_fds[1]);
-		stdoutbuf->m_fds[1] = -1;
+	if (m_stdoutbuf && m_stdoutbuf->m_fds[1] != -1) {
+		rc = close(m_stdoutbuf->m_fds[1]);
+		m_stdoutbuf->m_fds[1] = -1;
 	}
-	if (stderrbuf && stderrbuf->m_fds[1] != -1) {
-		rc = close(stderrbuf->m_fds[1]);
-		stderrbuf->m_fds[1] = -1;
+	if (m_stderrbuf && m_stderrbuf->m_fds[1] != -1) {
+		rc = close(m_stderrbuf->m_fds[1]);
+		m_stderrbuf->m_fds[1] = -1;
 	}
-	if (heartbeatbuf && heartbeatbuf->m_fds[1] != -1) {
-		rc = close(heartbeatbuf->m_fds[1]);
-		heartbeatbuf->m_fds[1] = -1;
+	if (m_heartbeatbuf && m_heartbeatbuf->m_fds[1] != -1) {
+		rc = close(m_heartbeatbuf->m_fds[1]);
+		m_heartbeatbuf->m_fds[1] = -1;
 	}
-	this->pid = pid;
-	state = EXTPROCESS_STATE_RUNNING;
+	this->m_pid = pid;
+	m_state = EXTPROCESS_STATE_RUNNING;
 }
 
 ExtProcesses::ExtProcesses(int sfd) {
@@ -242,6 +259,13 @@ ExtProcesses& ExtProcesses::operator=(ExtProcesses&& other) {
 }
 
 std::weak_ptr<ExtProcess> ExtProcesses::create(uint8_t flags) {
+	for (std::shared_ptr<ExtProcess>& proc : m_processes) {
+		if (proc.get()->m_state == EXTPROCESS_STATE_FINISHED) {
+			//
+			//return std::weak_ptr(proc);
+		}
+	}
+	m_dirty = 1;
 	return std::weak_ptr<ExtProcess>(m_processes.emplace_back(std::make_shared<ExtProcess>(flags)));
 }
 
@@ -259,6 +283,7 @@ int ExtProcesses::maintain() {
 	size_t pollfd_len = 1;
 	size_t running_process_count = m_running_process_count;
 	if (m_dirty) {
+		debug("ExtProcesses: rebuilding pollfd vector");
 		m_poll_fds.clear();
 		m_fdbuffers.clear();
 		struct pollfd * pollfd = &m_poll_fds.emplace_back();
@@ -269,19 +294,19 @@ int ExtProcesses::maintain() {
 		running_process_count = 0;
 		for (size_t process_idx = 0; process_idx < processes_len; ++ process_idx) {
 			ExtProcess& curr_proc = *m_processes.at(process_idx).get();
-			if (curr_proc.stdoutbuf && curr_proc.stdoutbuf->m_fds[0] != -1) {
-				add_fd(m_fdbuffers, m_poll_fds, process_idx, curr_proc.stdoutbuf->m_fds[0], curr_proc.stdoutbuf.get());
+			if (curr_proc.m_stdoutbuf && curr_proc.m_stdoutbuf->m_fds[0] != -1) {
+				add_fd(m_fdbuffers, m_poll_fds, process_idx, curr_proc.m_stdoutbuf->m_fds[0], curr_proc.m_stdoutbuf.get());
 				++ pollfd_len;
 			}
-			if (curr_proc.stderrbuf && curr_proc.stderrbuf->m_fds[0] != -1) {
-				add_fd(m_fdbuffers, m_poll_fds, process_idx, curr_proc.stderrbuf->m_fds[0], curr_proc.stderrbuf.get());
+			if (curr_proc.m_stderrbuf && curr_proc.m_stderrbuf->m_fds[0] != -1) {
+				add_fd(m_fdbuffers, m_poll_fds, process_idx, curr_proc.m_stderrbuf->m_fds[0], curr_proc.m_stderrbuf.get());
 				++ pollfd_len;
 			}
-			if (curr_proc.heartbeatbuf && curr_proc.heartbeatbuf->m_fds[0] != -1) {
-				add_fd(m_fdbuffers, m_poll_fds, process_idx, curr_proc.heartbeatbuf->m_fds[0], curr_proc.heartbeatbuf.get());
+			if (curr_proc.m_heartbeatbuf && curr_proc.m_heartbeatbuf->m_fds[0] != -1) {
+				add_fd(m_fdbuffers, m_poll_fds, process_idx, curr_proc.m_heartbeatbuf->m_fds[0], curr_proc.m_heartbeatbuf.get());
 				++ pollfd_len;
 			}
-			if (curr_proc.state == EXTPROCESS_STATE_RUNNING || curr_proc.state == EXTPROCESS_STATE_STOPPING_FDCLOSED || curr_proc.state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
+			if (curr_proc.m_state == EXTPROCESS_STATE_RUNNING || curr_proc.m_state == EXTPROCESS_STATE_STOPPING_FDCLOSED || curr_proc.m_state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
 				running_process_count += 1;
 			}
 		}
@@ -298,19 +323,20 @@ int ExtProcesses::maintain() {
 	}
 	if (running_process_count == 0) {
 		res = 1;
+		debug("ExtProcesses: running_process_count == 0");
 		goto finish;
 	}
 	{
 		int rc = poll(m_poll_fds.data(), pollfd_len, m_timeout);
 		if (rc < 0) {
 			if (errno == EINTR) {
-				debug("poll() EINTR\n");
+				debug("ExtProcesses: poll() EINTR");
 			}
 			throw std::runtime_error(std::string("ExtProcesses: maintain() poll() ") + strerror(errno));
 			res = -1;
 			goto finish;
 		}
-		//debug("poll() %d my pid: %d\n", rc, getpid());
+		debug("ExtProcesses: poll() %d my pid: %d", rc, getpid());
 	}
 	for (size_t pollfd_idx = 1; pollfd_idx < pollfd_len; ++ pollfd_idx) {
 		if (m_poll_fds[pollfd_idx].revents & POLLIN) {
@@ -320,7 +346,9 @@ int ExtProcesses::maintain() {
 			if (rc > 0) {
 				curr_buf->commit_write(rc);
 			}
-//			debug("read() %d from %d\n", rc, curr_ctx->pid);
+			#ifdef DEBUG_VERBOSE
+			debug("ExtProcesses: read() %d from %d", rc, (int)pollfd_idx);
+			#endif
 		} else
 		if (m_poll_fds[pollfd_idx].revents & POLLHUP) {
 			std::shared_ptr<ExtProcess>& curr_ctx = m_processes.at(m_fdbuffers.at(pollfd_idx - 1).first);
@@ -328,23 +356,23 @@ int ExtProcesses::maintain() {
 			// and close it again
 			// this is still required though in the event that a child
 			// closes their end of the pipe without terminating
-			debug("HUP %d %d %s\n", curr_ctx->pid, m_poll_fds[pollfd_idx].fd, curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED ? "DEFUNCT" : "RUNNING");
-			if (curr_ctx->stderrbuf && curr_ctx->stderrbuf->m_fds[0] == m_poll_fds[pollfd_idx].fd) {
-				curr_ctx->stderrbuf->close_read();
+			debug("ExtProcesses: HUP %d %d %s", curr_ctx->pid, m_poll_fds[pollfd_idx].fd, curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED ? "DEFUNCT" : "RUNNING");
+			if (curr_ctx->m_stderrbuf && curr_ctx->m_stderrbuf->m_fds[0] == m_poll_fds[pollfd_idx].fd) {
+				curr_ctx->m_stderrbuf->close_read();
 			}
-			if (curr_ctx->stdoutbuf && curr_ctx->stdoutbuf->m_fds[0] == m_poll_fds[pollfd_idx].fd) {
-				curr_ctx->stdoutbuf->close_read();
+			if (curr_ctx->m_stdoutbuf && curr_ctx->m_stdoutbuf->m_fds[0] == m_poll_fds[pollfd_idx].fd) {
+				curr_ctx->m_stdoutbuf->close_read();
 			}
-			if (curr_ctx->heartbeatbuf && curr_ctx->heartbeatbuf->m_fds[0] == m_poll_fds[pollfd_idx].fd) {
-				curr_ctx->heartbeatbuf->close_read();
+			if (curr_ctx->m_heartbeatbuf && curr_ctx->m_heartbeatbuf->m_fds[0] == m_poll_fds[pollfd_idx].fd) {
+				curr_ctx->m_heartbeatbuf->close_read();
 			}
-			if ((curr_ctx->stdoutbuf == nullptr || curr_ctx->stdoutbuf->m_fds[0] == -1) &&
-				(curr_ctx->stderrbuf == nullptr || curr_ctx->stderrbuf->m_fds[0] == -1) &&
-				(curr_ctx->heartbeatbuf == nullptr || curr_ctx->heartbeatbuf->m_fds[0] == -1)) {
-				if (curr_ctx->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
-					curr_ctx->state = EXTPROCESS_STATE_FINISHED;
+			if ((curr_ctx->m_stdoutbuf == nullptr || curr_ctx->m_stdoutbuf->m_fds[0] == -1) &&
+				(curr_ctx->m_stderrbuf == nullptr || curr_ctx->m_stderrbuf->m_fds[0] == -1) &&
+				(curr_ctx->m_heartbeatbuf == nullptr || curr_ctx->m_heartbeatbuf->m_fds[0] == -1)) {
+				if (curr_ctx->m_state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
+					curr_ctx->m_state = EXTPROCESS_STATE_FINISHED;
 				} else {
-					curr_ctx->state = EXTPROCESS_STATE_STOPPING_FDCLOSED;
+					curr_ctx->m_state = EXTPROCESS_STATE_STOPPING_FDCLOSED;
 				}
 			}
 			m_dirty = 1;
@@ -363,33 +391,33 @@ int ExtProcesses::maintain() {
 			goto finish;
 		}
 		if (siginfo.ssi_signo == SIGCHLD) {
-			debug("SIGCHLD for %d\n", siginfo.ssi_pid);
+			debug("ExtProcesses: SIGCHLD for %d", siginfo.ssi_pid);
 			size_t processes_len = m_processes.size();
 			for (size_t i = 0; i < processes_len; ++ i) {
 				ExtProcess * curr_ctx = m_processes.at(i).get();
-				if (static_cast<pid_t>(siginfo.ssi_pid) == curr_ctx->pid) {
+				if (static_cast<pid_t>(siginfo.ssi_pid) == curr_ctx->m_pid) {
 					int pstatus = 0;
-					pid_t chldpid = waitpid(curr_ctx->pid, &pstatus, WNOHANG | WUNTRACED | WCONTINUED);
+					pid_t chldpid = waitpid(curr_ctx->m_pid, &pstatus, WNOHANG | WUNTRACED | WCONTINUED);
 					if (chldpid < 0) {
-						debug("waitpid %s\n", strerror(errno));
+						debug("ExtProcesses: WAITPID %s", strerror(errno));
 					}
 					if (chldpid > 0) {
 						if (WIFSIGNALED(pstatus) || WIFEXITED(pstatus)) {
-							if (curr_ctx->state == EXTPROCESS_STATE_STOPPING_FDCLOSED) {
-								curr_ctx->state = EXTPROCESS_STATE_FINISHED;
+							if (curr_ctx->m_state == EXTPROCESS_STATE_STOPPING_FDCLOSED) {
+								curr_ctx->m_state = EXTPROCESS_STATE_FINISHED;
 								running_process_count --;
 								m_dirty = 1;
 							} else {
-								curr_ctx->state = EXTPROCESS_STATE_STOPPING_PROCESSDIED;
+								curr_ctx->m_state = EXTPROCESS_STATE_STOPPING_PROCESSDIED;
 							}
 						}
 						if (WIFSTOPPED(pstatus)) {
-							debug("STOPPED\n");
+							debug("ExtProcesses: STOPPED");
 						}
 						if (WIFCONTINUED(pstatus)) {
-							debug("CONTINUED\n");
+							debug("ExtProcesses: CONTINUED");
 						}
-						curr_ctx->exitstatus = pstatus;
+						curr_ctx->m_exitstatus = pstatus;
 						if (running_process_count == 0) {
 							res = 1;
 						}
@@ -397,7 +425,7 @@ int ExtProcesses::maintain() {
 				}
 			}
 		} else if (siginfo.ssi_signo == SIGINT) {
-			debug("SIGINT\n");
+			debug("ExtProcesses: SIGINT");
 			res = -1;
 			goto finish;
 		}
@@ -409,7 +437,7 @@ finish:
 const int ExtProcesses::runningcount() const {
 	size_t count = 0;
 	for (const std::shared_ptr<ExtProcess>& proc : m_processes) {
-		if (proc->state == EXTPROCESS_STATE_RUNNING || proc->state == EXTPROCESS_STATE_STOPPING_FDCLOSED || proc->state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
+		if (proc->m_state == EXTPROCESS_STATE_RUNNING || proc->m_state == EXTPROCESS_STATE_STOPPING_FDCLOSED || proc->m_state == EXTPROCESS_STATE_STOPPING_PROCESSDIED) {
 			count ++;
 		}
 	}
